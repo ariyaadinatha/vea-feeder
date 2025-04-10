@@ -1,6 +1,7 @@
 from datetime import datetime
 import feedparser
 import logging
+import json
 
 def fetch_feed(feed_name, url, keywords):
     logging.info(f"Fetching RSS from {feed_name}")
@@ -36,6 +37,12 @@ def vea():
 
     return result_list
 
+def export(data):
+    logging.info(f"Exporting data")
+    file_name = f"{datetime.today().date()}-news.json"
+
+    with open(file_name, "w") as file:
+        json.dump(data, file)
 
 if __name__ == "__main__":
     # keywords to filter
@@ -55,6 +62,7 @@ if __name__ == "__main__":
 
     logging.info("=============== Starting Vea ===============")
     result = vea()
-    print(result)
+    export(result)
+
     logging.info(f"Total result: {len(result)}")
     logging.info("=============== Successfully running Vea ===============")        
