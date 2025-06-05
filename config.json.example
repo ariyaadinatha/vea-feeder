@@ -1,0 +1,24 @@
+{
+  "keywords": [
+    "ransomware",
+    "fortinet",
+    "vulnerability",
+    "exploit",
+    "malware",
+    "cybersecurity",
+    "phishing",
+    "indonesian",
+    "indonesia"
+  ],
+  "feeds": {
+    "HackerNews": "https://hnrss.org/frontpage",
+    "ThreatPost": "https://threatpost.com/feed/",
+    "The Hacker News": "https://feeds.feedburner.com/TheHackersNews",
+    "Bleeping Computer": "https://www.bleepingcomputer.com/feed/",
+    "SANS Internet Storm Center": "https://isc.sans.edu/rssfeed.xml",
+    "KrebsOnSecurity": "https://krebsonsecurity.com/feed/",
+    "Daily Dark Web": "https://dailydarkweb.net/feed/"
+  },
+  "output_directory": "data",
+  "log_level": "INFO"
+}

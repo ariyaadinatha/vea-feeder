@@ -53,23 +53,44 @@ def fetch_feed(feed_name, url, keywords):
     try:
         feed = feedparser.parse(url)
 
-        # Check for parsing errors
+        # Check for parsing errors reported by feedparser's bozo attribute
         if hasattr(feed, 'bozo') and feed.bozo == 1:
             logging.warning(f"Malformed feed detected for {feed_name}: {feed.bozo_exception}")
+
+        # CRITICAL FIX: Check if feed.entries exists and is iterable
+        if not hasattr(feed, 'entries') or not isinstance(feed.entries, list):
+            logging.warning(f"Feed '{feed_name}' has no usable 'entries' attribute or it's not a list. Skipping processing this feed.")
+            return []
 
         logging.info(f"Total entries found in {feed_name}: {len(feed.entries)}")
 
         logging.info(f"Processing feed from {feed_name}")
         for entry in feed.entries:
             title = entry.get('title')
-            summary = entry.get('summary')[:200] # limit the summary to 200 characters
             link = entry.get('link')
             published_raw = entry.get('published')
 
-            # Ensure title exists before processing
+            # --- SAFELY HANDLE SUMMARY ---
+            raw_summary = entry.get('summary')
+            processed_summary = None # Initialize to None
+
+            if raw_summary:
+                # feedparser can return summary as a dict, e.g., {'type': 'text/html', 'value': '...'}
+                if isinstance(raw_summary, dict) and 'value' in raw_summary:
+                    processed_summary = raw_summary['value']
+                elif isinstance(raw_summary, str):
+                    processed_summary = raw_summary
+                
+                # if processed_summary is a string, slice it
+                if processed_summary:
+                    processed_summary = processed_summary[:200]
+                else:
+                    processed_summary = None # Ensure it's None if parsing failed
+
+            # Ensure title and link exist before processing
             if not title or not link:
                 logging.debug(f"Skipping entry from {feed_name} due to missing title or link: {entry}")
-                continue # Skip to the next entry
+                continue
 
             title_lower = title.lower()
             
@@ -77,14 +98,8 @@ def fetch_feed(feed_name, url, keywords):
             published_iso = None
             if published_raw:
                 try:
-                    # feedparser often provides a parsed_parsed attribute (time.struct_time)
                     if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                        # Convert time.struct_time to datetime object, then to ISO format
                         published_iso = datetime(*entry.published_parsed[:6]).isoformat()
-                    # else:
-                        # Fallback for less common cases, attempt direct parsing (less reliable)
-                        # This part might need refinement based on diverse date formats
-                        # pass # Keeping it simple for now, relying on parsed_parsed
                 except Exception as e:
                     logging.warning(f"Could not parse published date '{published_raw}' for entry '{title}': {e}")
             
@@ -93,13 +108,13 @@ def fetch_feed(feed_name, url, keywords):
                 matched_entries_list.append({
                     'source': feed_name,
                     'title': title,
-                    'summary': summary,
+                    'summary': processed_summary, # Use the safely processed summary
                     'link': link,
-                    'published': published_iso, # Use ISO formatted date
+                    'published': published_iso,
                 })
 
     except Exception as e:
-        logging.error(f"An unexpected error occurred while fetching/processing {feed_name} ({url}): {e}")
+        logging.error(f"An unexpected error occurred while fetching/processing {feed_name} ({url}): '{e}'")
 
     return matched_entries_list
 
