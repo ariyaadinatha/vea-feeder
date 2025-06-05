@@ -157,42 +157,51 @@ def export_data(data, output_dir="."):
         logging.error(f"Error exporting data to {file_path}: {e}")
 
 if __name__ == "__main__":
+    # --- Logging Initialization (Moved to the very top) ---
+    # We'll set an initial log level (e.g., INFO or DEBUG) here.
+    # It can be updated later with the config's log_level, if successfully loaded.
+    initial_log_level = logging.INFO # Use INFO as a sensible default
+    
+    logging.basicConfig(filename='vea.log',
+                        format='[%(asctime)s-%(levelname)s-%(funcName)s-%(lineno)d]: %(message)s',
+                        level=initial_log_level,
+                        encoding='utf-8')
+    logging.info("Vea script started. Logging initialized.")
+
     # --- Configuration Loading ---
     config_file_path = 'config.json'
     try:
         config = load_config(config_file_path)
-    except (FileNotFoundError, json.JSONDecodeError):
-        logging.critical(f"Failed to load configuration. Exiting.")
+
+        # If config loads successfully, update log level from config
+        log_level_str = config.get('log_level', 'INFO').upper()
+        numeric_log_level = getattr(logging, log_level_str, logging.INFO)
+        if not isinstance(numeric_log_level, int):
+            numeric_log_level = logging.INFO
+            logging.warning(f"Invalid log_level '{log_level_str}' in config. Defaulting to INFO.")
+        
+        # Set the root logger level (which basicConfig applies to)
+        logging.getLogger().setLevel(numeric_log_level)
+        logging.info(f"Log level updated to: {logging.getLevelName(numeric_log_level)}")
+
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        # Now this critical message will go to vea.log because basicConfig has run
+        logging.critical(f"Failed to load configuration from {config_file_path}: {e}. Exiting.")
         exit(1) # Exit the script if config loading fails
 
+    # --- Proceed with script execution only if config loaded successfully ---
     keyword_list = config.get('keywords', [])
     feed_dictionary = config.get('feeds', {})
-    output_directory = config.get('output_directory', 'data') # Default to 'data' if not in config
-    log_level_str = config.get('log_level', 'INFO').upper() # Default to INFO
-
-    # Map string log level to logging module constants
-    numeric_log_level = getattr(logging, log_level_str, logging.INFO)
-    if not isinstance(numeric_log_level, int): # Fallback if string is not a valid level
-        numeric_log_level = logging.INFO
-        logging.warning(f"Invalid log_level '{log_level_str}' in config. Defaulting to INFO.")
-
-    # --- Logging Initialization ---
-    logging.basicConfig(filename='vea.log',
-                        format='[%(asctime)s-%(levelname)s-%(funcName)s-%(lineno)d]: %(message)s',
-                        level=numeric_log_level,
-                        encoding='utf-8')
+    output_directory = config.get('output_directory', 'data')
 
     logging.info("=============== Starting Vea News Aggregator ===============")
     
-    start_time = time.time() # Start timer
-
-    # Fetch, filter, and aggregate news
-    result = vea(feed_dictionary, keyword_list)
+    start_time = time.time()
     
-    # Export the results
+    result = vea(feed_dictionary, keyword_list)
     export_data(result, output_directory)
 
-    end_time = time.time() # End timer
+    end_time = time.time()
     duration = end_time - start_time
 
     logging.info(f"Total unique articles collected: {len(result)}")
