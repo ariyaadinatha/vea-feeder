@@ -2,67 +2,199 @@ from datetime import datetime
 import feedparser
 import logging
 import json
+import time
+import os # Import os module for path operations
+
+# --- Configuration Loading Function ---
+def load_config(config_path='config.json'):
+    """
+    Loads configuration from a JSON file.
+
+    Args:
+        config_path (str): The path to the configuration file.
+
+    Returns:
+        dict: A dictionary containing the loaded configuration.
+    Raises:
+        FileNotFoundError: If the configuration file does not exist.
+        json.JSONDecodeError: If the configuration file is malformed JSON.
+    """
+    if not os.path.exists(config_path):
+        logging.error(f"Configuration file not found at: {config_path}")
+        raise FileNotFoundError(f"Configuration file not found at: {config_path}")
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        logging.info(f"Configuration loaded from {config_path}")
+        return config
+    except json.JSONDecodeError as e:
+        logging.error(f"Error decoding JSON from config file {config_path}: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"An unexpected error occurred while loading config: {e}")
+        raise
+
 
 def fetch_feed(feed_name, url, keywords):
-    logging.info(f"Fetching RSS from {feed_name}")
+    """
+    Fetches an RSS feed, parses it, and filters entries based on keywords.
 
-    feed = feedparser.parse(url)
+    Args:
+        feed_name (str): The name of the feed (e.g., "HackerNews").
+        url (str): The URL of the RSS feed.
+        keywords (list): A list of keywords to filter titles by.
+
+    Returns:
+        list: A list of dictionaries, each representing a matched entry.
+    """
+    logging.info(f"Fetching RSS from {feed_name} ({url})")
     matched_entries_list = []
-    logging.info(f"Total feed fetched: {len(feed.entries)}")
-    
-    logging.info(f"Processing feed from {feed_name}")
-    for entry in feed.entries:
-        title = entry.get('title')
-        summary = entry.get('summary')
-        link = entry.get('link')
-        published = entry.get('published')
-        
-        for keyword in keywords:
-            if keyword in title.lower():
+
+    try:
+        feed = feedparser.parse(url)
+
+        # Check for parsing errors
+        if hasattr(feed, 'bozo') and feed.bozo == 1:
+            logging.warning(f"Malformed feed detected for {feed_name}: {feed.bozo_exception}")
+
+        logging.info(f"Total entries found in {feed_name}: {len(feed.entries)}")
+
+        logging.info(f"Processing feed from {feed_name}")
+        for entry in feed.entries:
+            title = entry.get('title')
+            summary = entry.get('summary')[:200] # limit the summary to 200 characters
+            link = entry.get('link')
+            published_raw = entry.get('published')
+
+            # Ensure title exists before processing
+            if not title or not link:
+                logging.debug(f"Skipping entry from {feed_name} due to missing title or link: {entry}")
+                continue # Skip to the next entry
+
+            title_lower = title.lower()
+            
+            # Convert published date to ISO 8601 format
+            published_iso = None
+            if published_raw:
+                try:
+                    # feedparser often provides a parsed_parsed attribute (time.struct_time)
+                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                        # Convert time.struct_time to datetime object, then to ISO format
+                        published_iso = datetime(*entry.published_parsed[:6]).isoformat()
+                    # else:
+                        # Fallback for less common cases, attempt direct parsing (less reliable)
+                        # This part might need refinement based on diverse date formats
+                        # pass # Keeping it simple for now, relying on parsed_parsed
+                except Exception as e:
+                    logging.warning(f"Could not parse published date '{published_raw}' for entry '{title}': {e}")
+            
+            # Check if any keyword is present in the title
+            if any(keyword in title_lower for keyword in keywords):
                 matched_entries_list.append({
                     'source': feed_name,
                     'title': title,
+                    'summary': summary,
                     'link': link,
-                    'published': published,
+                    'published': published_iso, # Use ISO formatted date
                 })
+
+    except Exception as e:
+        logging.error(f"An unexpected error occurred while fetching/processing {feed_name} ({url}): {e}")
 
     return matched_entries_list
 
-def vea():
-    result_list = []
+def vea(feed_dictionary, keyword_list):
+    """
+    Aggregates news from multiple RSS feeds, filters them, and deduplicates.
+
+    Args:
+        feed_dictionary (dict): A dictionary of feed names to URLs.
+        keyword_list (list): A list of keywords to filter by.
+
+    Returns:
+        list: A list of unique matched entries.
+    """
+    logging.info("Starting Vea aggregation process.")
+    all_matched_entries = []
+    seen_links = set() # To store unique links for deduplication
 
     for name, url in feed_dictionary.items():
-        result = fetch_feed(name, url, keyword_list)
-        result_list += result
+        # Fetch entries for the current feed
+        current_feed_entries = fetch_feed(name, url, keyword_list)
+        
+        # Deduplicate and add to the main list
+        for entry in current_feed_entries:
+            if entry['link'] not in seen_links:
+                all_matched_entries.append(entry)
+                seen_links.add(entry['link'])
+            else:
+                logging.debug(f"Duplicate entry found and skipped: {entry['link']}")
 
-    return result_list
+    logging.info(f"Aggregation complete. Total unique results: {len(all_matched_entries)}")
+    return all_matched_entries
 
-def export(data):
-    logging.info(f"Exporting data")
+def export_data(data, output_dir="."):
+    """
+    Exports the collected data to a JSON file.
+
+    Args:
+        data (list): The list of dictionaries to export.
+        output_dir (str): The directory to save the JSON file. Defaults to current directory.
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        logging.info(f"Created output directory: {output_dir}")
+
     file_name = f"{datetime.today().date()}-news.json"
+    file_path = os.path.join(output_dir, file_name)
 
-    with open(file_name, "w") as file:
-        json.dump(data, file)
+    logging.info(f"Exporting data to {file_path}")
+    try:
+        with open(file_path, "w", encoding='utf-8') as file:
+            json.dump(data, file, indent=4, ensure_ascii=False)
+        logging.info(f"Data successfully exported to {file_path}")
+    except IOError as e:
+        logging.error(f"Error exporting data to {file_path}: {e}")
 
 if __name__ == "__main__":
-    # keywords to filter
-    keyword_list = ['ransomware', 'fortinet']
+    # --- Configuration Loading ---
+    config_file_path = 'config.json'
+    try:
+        config = load_config(config_file_path)
+    except (FileNotFoundError, json.JSONDecodeError):
+        logging.critical(f"Failed to load configuration. Exiting.")
+        exit(1) # Exit the script if config loading fails
 
-    # Dictionary of feeds
-    feed_dictionary = {
-        "HackerNews": "https://hnrss.org/frontpage",
-        "ThreatPost": "https://threatpost.com/feed/",
-        "The Hacker News": "https://feeds.feedburner.com/TheHackersNews",
-        "Bleeping Computer": "https://www.bleepingcomputer.com/feed/",
-    }
+    keyword_list = config.get('keywords', [])
+    feed_dictionary = config.get('feeds', {})
+    output_directory = config.get('output_directory', 'data') # Default to 'data' if not in config
+    log_level_str = config.get('log_level', 'INFO').upper() # Default to INFO
 
-    # Logging file initialization
+    # Map string log level to logging module constants
+    numeric_log_level = getattr(logging, log_level_str, logging.INFO)
+    if not isinstance(numeric_log_level, int): # Fallback if string is not a valid level
+        numeric_log_level = logging.INFO
+        logging.warning(f"Invalid log_level '{log_level_str}' in config. Defaulting to INFO.")
+
+    # --- Logging Initialization ---
     logging.basicConfig(filename='vea.log',
-                    format='[%(asctime)s-%(levelname)s-%(funcName)s-%(lineno)d]: %(message)s', level=logging.INFO)
+                        format='[%(asctime)s-%(levelname)s-%(funcName)s-%(lineno)d]: %(message)s',
+                        level=numeric_log_level,
+                        encoding='utf-8')
 
-    logging.info("=============== Starting Vea ===============")
-    result = vea()
-    export(result)
+    logging.info("=============== Starting Vea News Aggregator ===============")
+    
+    start_time = time.time() # Start timer
 
-    logging.info(f"Total result: {len(result)}")
-    logging.info("=============== Successfully running Vea ===============")        
+    # Fetch, filter, and aggregate news
+    result = vea(feed_dictionary, keyword_list)
+    
+    # Export the results
+    export_data(result, output_directory)
+
+    end_time = time.time() # End timer
+    duration = end_time - start_time
+
+    logging.info(f"Total unique articles collected: {len(result)}")
+    logging.info(f"Vea operation completed in {duration:.2f} seconds.")
+    logging.info("=============== Vea News Aggregator Finished ===============")
